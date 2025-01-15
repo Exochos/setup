@@ -1,1 +1,1 @@
-a shell script to install and setup a fresh VM instance.
+a shell script to setup a fresh Ubuntu VM instance.
