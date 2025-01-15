@@ -342,29 +342,6 @@ EOF
 EOF
 } >> "$LOG_FILE" 2>&1
 
-###################################################################
-# Step 12: Creating a deployBot User
-###################################################################
-# This user can be used for CI/CD or automated deployments.
-###################################################################
-{
-  echo "Creating 'deployBot' user (if not exists) for CI/CD..."
-  if id "deployBot" &>/dev/null; then
-    echo "User deployBot already exists. Skipping."
-  else
-    # Create user with no interactive password prompt; random password assigned
-    adduser --gecos "" --disabled-password deployBot
-    # Create a random password (12 chars base64). You can store it or reset manually.
-    DEPLOYBOT_PASS=$(openssl rand -base64 12)
-    echo "deployBot:$DEPLOYBOT_PASS" | chpasswd
-
-    # Add to sudo group for administrative tasks
-    usermod -aG sudo deployBot
-    echo "deployBot user created with sudo privileges."
-    echo "Initial password: $DEPLOYBOT_PASS"
-    echo "Please share or reset as needed."
-  fi
-} >> "$LOG_FILE" 2>&1
 
 ###################################################################
 # Final Output
