@@ -7,14 +7,12 @@
 #░▒▓███████▓▒░░▒▓████████▓▒░  ░▒▓█▓▒░    ░▒▓██████▓▒░░▒▓█▓▒░▒▓██▓▒░▒▓███████▓▒░░▒▓█▓▒░░▒▓█▓▒░              
 #!/bin/bash
 #!/bin/bash
-# Server Setup Script v0.80
+# Server Setup Script v0.90
 # Last updated: 2025-01-15
 # Changelog:
-# v0.80 - Replaced health check with Node-based endpoint, 
-#         introduced --email flag, changed monitoring port, 
-#         added logging, swap check, increased rate limit, 
-#         and refined overall script.
-
+# v0.90 - Added UFW enable, success checks, enhanced Node health check JSON,
+#         created deployBot user, and improved error handling.
+#
 # Usage:
 #   ./setup.sh yourdomain.com [--email=support@example.com]
 #
@@ -24,7 +22,12 @@
 ###################################################################
 # Configuration and Parameter Parsing
 ###################################################################
-VERSION="0.80"
+# -e  : Exit on command error
+# -u  : Treat unset variables as error
+# -o pipefail : Fail if any command in a pipeline fails
+set -euo pipefail
+
+VERSION="0.90"
 LOG_FILE="/var/log/server-setup.log"
 
 DOMAIN_NAME=""
@@ -32,17 +35,16 @@ EMAIL_ARG=""
 MONITORING_PORT="4206969"
 
 # Parse arguments
-for arg in "$@"
-do
+for arg in "$@"; do
   case $arg in
     --email=*)
       EMAIL_ARG="${arg#*=}"
       shift
-    ;;
+      ;;
     *)
       # If it doesn't match --email, assume it's the domain
       DOMAIN_NAME="$arg"
-    ;;
+      ;;
   esac
 done
 
@@ -81,7 +83,10 @@ fi
 {
   echo "Updating system packages..."
   apt update -y && apt upgrade -y
-} >> "$LOG_FILE" 2>&1
+} >> "$LOG_FILE" 2>&1 || {
+  echo "System update/upgrade failed. Exiting."
+  exit 1
+}
 
 ###################################################################
 # Step 2: Check/Setup Swap
@@ -92,10 +97,10 @@ if [ -f "$SWAPFILE" ]; then
 else
   echo "Creating swap file..." | tee -a "$LOG_FILE"
   {
-    fallocate -l 4G $SWAPFILE
-    chmod 600 $SWAPFILE
-    mkswap $SWAPFILE
-    swapon $SWAPFILE
+    fallocate -l 4G "$SWAPFILE"
+    chmod 600 "$SWAPFILE"
+    mkswap "$SWAPFILE"
+    swapon "$SWAPFILE"
     echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab
     # Optimize swap settings
     echo 'vm.swappiness=10' | tee -a /etc/sysctl.conf
@@ -109,7 +114,10 @@ fi
 {
   echo "Installing Nginx, zip, and other utilities..."
   apt install -y nginx zip
-} >> "$LOG_FILE" 2>&1
+} >> "$LOG_FILE" 2>&1 || {
+  echo "Failed to install basic packages. Exiting."
+  exit 1
+}
 
 ###################################################################
 # Step 4: Install & Configure Monitoring (NetData)
@@ -117,22 +125,32 @@ fi
 {
   echo "Installing NetData..."
   apt install -y netdata
-
   # Bind to localhost for security
   sed -i 's/# bind to = \*/bind to = 127.0.0.1/g' /etc/netdata/netdata.conf
   systemctl restart netdata
-} >> "$LOG_FILE" 2>&1
+} >> "$LOG_FILE" 2>&1 || {
+  echo "Failed to install/configure NetData. Exiting."
+  exit 1
+}
 
 ###################################################################
-# Step 5: Configure UFW Firewall (Ensure SSH not cut off)
+# Step 5: UFW Firewall Configuration
 ###################################################################
 {
-  echo "Configuring UFW firewall..."
+  echo "Configuring UFW firewall rules..."
   ufw allow 'Nginx Full'
   ufw allow OpenSSH
   ufw allow "$MONITORING_PORT"/tcp
-  # Reload to apply
-  ufw reload
+
+  # If UFW is inactive, enable it
+  UFW_STATUS=$(ufw status | grep -i "Status:" | awk '{print $2}')
+  if [ "$UFW_STATUS" = "inactive" ]; then
+    echo "UFW is inactive; enabling it now. Confirming SSH is allowed..."
+    ufw --force enable
+  else
+    # Reload to apply
+    ufw reload
+  fi
 } >> "$LOG_FILE" 2>&1
 
 ###################################################################
@@ -142,8 +160,11 @@ fi
   echo "Installing Certbot..."
   apt install -y certbot python3-certbot-nginx
   echo "Obtaining SSL certificate for $DOMAIN_NAME..."
-  certbot --nginx -d "$DOMAIN_NAME" -d "www.$DOMAIN_NAME" --non-interactive --agree-tos -m "$EMAIL"
-} >> "$LOG_FILE" 2>&1
+  certbot --nginx -d "$DOMAIN_NAME" -d "www.$DOMAIN_NAME" --non-interactive --agree-tos -m "$EMAIL" --redirect
+} >> "$LOG_FILE" 2>&1 || {
+  echo "Certbot failed to obtain certificate for $DOMAIN_NAME. Exiting."
+  exit 1
+}
 
 ###################################################################
 # Step 7: Install Node.js, npm, and PM2
@@ -153,13 +174,13 @@ fi
   curl -sL https://deb.nodesource.com/setup_18.x | bash -
   apt install -y nodejs
   npm install -g pm2
-} >> "$LOG_FILE" 2>&1
+} >> "$LOG_FILE" 2>&1 || {
+  echo "Failed to install Node.js/PM2. Exiting."
+  exit 1
+}
 
 ###################################################################
-# Step 8: Node.js-based Health Check
-###################################################################
-# We’ll create a simple Node server that responds with JSON on /health
-# This script will be managed by PM2.
+# Step 8: Enhanced Node.js-based Health Check
 ###################################################################
 NODE_APP_DIR="/var/www/$DOMAIN_NAME/health-app"
 NODE_APP_FILE="$NODE_APP_DIR/index.js"
@@ -167,22 +188,24 @@ NODE_APP_FILE="$NODE_APP_DIR/index.js"
 mkdir -p "$NODE_APP_DIR"
 
 cat > "$NODE_APP_FILE" <<EOF
+const os = require('os');
 const http = require('http');
 
 const PORT = process.env.PORT || $MONITORING_PORT;
 
-// Basic Node health endpoint
-// Note: This is for demonstration; you can refine as needed.
 const requestListener = (req, res) => {
   if (req.url === '/health') {
     const healthData = {
       status: 'healthy',
       timestamp: new Date().toISOString(),
-      server_load: require('os').loadavg(),
+      server_load: os.loadavg(),
       memory_usage: process.memoryUsage(),
+      uptime_seconds: os.uptime(),
+      platform: os.platform(),
+      arch: os.arch()
     };
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(healthData));
+    res.end(JSON.stringify(healthData, null, 2));
   } else {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
@@ -210,12 +233,25 @@ NGINX_SITE_CONF="/etc/nginx/sites-available/$DOMAIN_NAME"
 {
   echo "Setting up Nginx configuration for $DOMAIN_NAME..."
 
-  # We'll keep global settings in main nginx.conf, so here only server block
   cat > "$NGINX_SITE_CONF" <<EOF
 server {
+    # HTTP server block that redirects all traffic to HTTPS
     listen 80;
     listen [::]:80;
     server_name $DOMAIN_NAME www.$DOMAIN_NAME;
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    # HTTPS server block
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name $DOMAIN_NAME www.$DOMAIN_NAME;
+
+    # SSL certs installed by Certbot (paths are automatically generated)
+    ssl_certificate /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
 
     root /var/www/$DOMAIN_NAME/html;
     index index.html index.htm;
@@ -272,14 +308,17 @@ EOF
     htpasswd -c /etc/nginx/.htpasswd admin
   fi
 
-  # Enable site
+  # Enable site if not already linked
   if [ ! -L /etc/nginx/sites-enabled/$DOMAIN_NAME ]; then
     ln -s /etc/nginx/sites-available/$DOMAIN_NAME /etc/nginx/sites-enabled/
   fi
 
   # Test and restart Nginx
   nginx -t && systemctl restart nginx
-} >> "$LOG_FILE" 2>&1
+} >> "$LOG_FILE" 2>&1 || {
+  echo "Failed to configure or restart Nginx. Exiting."
+  exit 1
+}
 
 ###################################################################
 # Step 10: PM2 Startup
@@ -288,12 +327,13 @@ EOF
   # Enable PM2 startup so it restarts on server reboot
   pm2 startup systemd -u root --hp /root
   pm2 save
-} >> "$LOG_FILE" 2>&1
+} >> "$LOG_FILE" 2>&1 || {
+  echo "Failed to enable PM2 startup. Exiting."
+  exit 1
+}
 
 ###################################################################
 # Step 11: Basic Monitoring Cron Job
-###################################################################
-# Example: Checks our Node-based health endpoint every 5 min
 ###################################################################
 {
   echo "Setting up server monitoring cron job at /etc/cron.d/server-monitor..."
@@ -303,12 +343,39 @@ EOF
 } >> "$LOG_FILE" 2>&1
 
 ###################################################################
+# Step 12: Creating a deployBot User
+###################################################################
+# This user can be used for CI/CD or automated deployments.
+###################################################################
+{
+  echo "Creating 'deployBot' user (if not exists) for CI/CD..."
+  if id "deployBot" &>/dev/null; then
+    echo "User deployBot already exists. Skipping."
+  else
+    # Create user with no interactive password prompt; random password assigned
+    adduser --gecos "" --disabled-password deployBot
+    # Create a random password (12 chars base64). You can store it or reset manually.
+    DEPLOYBOT_PASS=$(openssl rand -base64 12)
+    echo "deployBot:$DEPLOYBOT_PASS" | chpasswd
+
+    # Add to sudo group for administrative tasks
+    usermod -aG sudo deployBot
+    echo "deployBot user created with sudo privileges."
+    echo "Initial password: $DEPLOYBOT_PASS"
+    echo "Please share or reset as needed."
+  fi
+} >> "$LOG_FILE" 2>&1
+
+###################################################################
 # Final Output
 ###################################################################
 echo "=================================================="
 echo "Web server setup complete for $DOMAIN_NAME!"
-echo "Monitoring (NetData) dashboard: http://$DOMAIN_NAME/monitoring"
-echo "Node-based health endpoint:     http://$DOMAIN_NAME:$MONITORING_PORT/health"
+echo "Monitoring (NetData) dashboard:  https://$DOMAIN_NAME/monitoring"
+echo "Node-based health endpoint:      http://$DOMAIN_NAME:$MONITORING_PORT/health"
+echo
+echo "deployBot user created for CI/CD. (See script logs for its password if newly created.)"
+echo
 echo "Remember to check your DNS settings for $DOMAIN_NAME and www.$DOMAIN_NAME."
 echo "Log file: $LOG_FILE"
 echo "Script version: $VERSION"
