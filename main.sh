@@ -1,46 +1,42 @@
 #!/bin/bash
-# main.sh --> Master script that orchestrates all the sub-scripts.
+# main.sh --> Master script that orchestrates sub-scripts.
 set -euo pipefail
 
-# We might parse the domain/email arguments here
-DOMAIN_NAME="${1:-}"
+# Source the shared environment
+source "$(dirname "$0")/env.sh"
+
+# If the user passed a domain argument (e.g., ./main.sh mydomain.com), override DOMAIN_NAME.
+if [ $# -ge 1 ]; then
+  export DOMAIN_NAME="$1"
+fi
+
+# Basic usage check if DOMAIN_NAME is still empty
 if [ -z "$DOMAIN_NAME" ]; then
-  echo "Usage: $0 yourdomain.com
+  echo "Usage: $0 <domain.com>"
   exit 1
 fi
 
-EMAIL="admin@$DOMAIN_NAME"
+# Because EMAIL is derived from $DOMAIN_NAME in env.sh,
+# we can re-export it to ensure it's in sync with the just-updated DOMAIN_NAME.
+export EMAIL="admin@$DOMAIN_NAME"
 
+echo "========================================"
+echo "Running main script with domain: $DOMAIN_NAME"
+echo "Email: $EMAIL"
+echo "Monitoring port: $MONITORING_PORT"
+echo "Log file: $LOG_FILE"
+echo "Script version: $VERSION"
+echo "========================================"
 
-# Export so that sub-scripts can read these
-export DOMAIN_NAME
-export EMAIL
-
-# Adjust or keep defaults
-export LOG_FILE="/var/log/server_setup.log"
-export VERSION="1.0"
-
-# Source env.sh so sub-scripts can also rely on shared environment
-source "$(dirname "$0")/env.sh"
-
+# Make sure sub-scripts are executable
 chmod +x "$(dirname "$0")"/*.sh
 
-# Pre-flight checks
-"$(dirname "$0")/01_preflight.sh"
-
-# System update
-"$(dirname "$0")/02_system_update.sh"
-
-# Swap setup
-"$(dirname "$0")/03_swap.sh"
-
-# Nginx Install && config
-"$(dirname "$0")/09_nginx_config.sh"
-
-# SSL (Certbot)
-"$(dirname "$0")/06_certbot.sh"
-
-# Final report
-"$(dirname "$0")/99_final_report.sh"
+# Call sub-scripts in the desired sequence
+"$(dirname "$0")/preflight.sh"
+"$(dirname "$0")/system_update.sh"
+"$(dirname "$0")/swap.sh"
+"$(dirname "$0")/nginx_setup.sh"
+"$(dirname "$0")/certbot.sh"
+"$(dirname "$0")/final_report.sh"
 
 exit 0
