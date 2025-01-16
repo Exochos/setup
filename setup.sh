@@ -29,8 +29,8 @@ set -euo pipefail
 
 VERSION="0.90"
 LOG_FILE="/var/log/server_setup.log"
-DOMAIN_NAME=""
-EMAIL="admin"
+DOMAIN_NAME=$1
+EMAIL="admin@$DOMAIN_NAME"
 MONITORING_PORT="4206969"
 
 # Basic usage check
