@@ -31,7 +31,7 @@ VERSION="0.90"
 LOG_FILE="/var/log/server_setup.log"
 DOMAIN_NAME=$1
 EMAIL="admin@$DOMAIN_NAME"
-MONITORING_PORT="4206969"
+MONITORING_PORT="2469"
 
 # Basic usage check
 if [ -z "$DOMAIN_NAME" ]; then
