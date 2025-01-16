@@ -28,37 +28,15 @@
 set -euo pipefail
 
 VERSION="0.90"
-LOG_FILE="/var/log/server-setup.log"
-
+LOG_FILE="/var/log/server_setup.log"
 DOMAIN_NAME=""
-EMAIL_ARG=""
+EMAIL="admin"
 MONITORING_PORT="4206969"
-
-# Parse arguments
-for arg in "$@"; do
-  case $arg in
-    --email=*)
-      EMAIL_ARG="${arg#*=}"
-      shift
-      ;;
-    *)
-      # If it doesn't match --email, assume it's the domain
-      DOMAIN_NAME="$arg"
-      ;;
-  esac
-done
 
 # Basic usage check
 if [ -z "$DOMAIN_NAME" ]; then
   echo "Usage: $0 yourdomain.com [--email=admin@yourdomain.com]"
   exit 1
-fi
-
-# If the user passed in an email, use that; otherwise default
-if [ -n "$EMAIL_ARG" ]; then
-  EMAIL="$EMAIL_ARG"
-else
-  EMAIL="admin@$DOMAIN_NAME"
 fi
 
 echo "Running setup for domain: $DOMAIN_NAME"
@@ -83,10 +61,11 @@ fi
 {
   echo "Updating system packages..."
   apt update -y && apt upgrade -y
-} >> "$LOG_FILE" 2>&1 || {
+} 2>&1 | tee -a "$LOG_FILE" || {
   echo "System update/upgrade failed. Exiting."
   exit 1
 }
+
 
 ###################################################################
 # Step 2: Check/Setup Swap
