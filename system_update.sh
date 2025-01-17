@@ -7,8 +7,8 @@ source "$(dirname "$0")/env.sh"
 echo "=== 02_system_update: Updating system..." | tee -a "$LOG_FILE"
 
 {
-  apt update -y
-  apt upgrade -y
+  apt-get update -y
+  apt-get upgrade -y
 } 2>&1 | tee -a "$LOG_FILE"
 
 echo "=== 02_system_update: Done." | tee -a "$LOG_FILE"
