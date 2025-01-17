@@ -2,19 +2,13 @@
 # nginx.sh --> Install and Configure Nginx with Security Enhancements
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
-
 echo "=== 04_install_basics: Installing packages..." | tee -a "$LOG_FILE"
 {
     # Update package list
     apt-get update
 
     # Install Nginx and supporting packages
-    apt-get install -y nginx \
-        nginx-extras \        # Additional Nginx modules
-        certbot \            # For SSL certificates
-        python3-certbot-nginx \  # Certbot Nginx plugin
-        apache2-utils \      # For htpasswd utility
-        fail2ban            # For basic security
+    apt-get install -y nginx nginx-extras certbot python3-certbot-nginx apache2-utils fail2ban
     
     # Create Nginx cache directories
     mkdir -p /var/cache/nginx/proxy_cache
