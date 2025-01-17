@@ -69,10 +69,10 @@ EOF
 
 # Verify installation
 if systemctl is-active --quiet nginx; then
-    echo "=== 04_install_basics: Nginx installed and running successfully." | tee -a "$LOG_FILE"
+    echo "Nginx installed and running successfully." | tee -a "$LOG_FILE"
 else
-    echo "=== 04_install_basics: Error: Nginx installation failed!" | tee -a "$LOG_FILE"
+    echo "Error: Nginx installation failed!" | tee -a "$LOG_FILE"
     exit 1
 fi
 
-echo "=== 04_install_basics: Done." | tee -a "$LOG_FILE"
+echo "Done." | tee -a "$LOG_FILE"
