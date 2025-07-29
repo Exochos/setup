@@ -1,4 +1,6 @@
-a shell script to setup a fresh Ubuntu VM instance.
+#a shell script to setup a fresh Debian or Ubuntu instance,
+
+
 Usage:
 ```
 git clone
